@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sprint Task Tracker</title>
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    /* ── Extend Tailwind with brand tokens ── */
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary:       '#2563EB',
+            'primary-dark':'#1D4ED8',
+            'primary-light':'#EFF6FF',
+          },
+          boxShadow: {
+            card: '0 4px 24px 0 rgba(37,99,235,0.08)',
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    /* ────────────────────────────────────────
+       Custom CSS checkbox
+    ──────────────────────────────────────── */
+    .task-checkbox {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      min-width: 20px;
+      border: 2px solid #CBD5E1;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.18s, border-color 0.18s;
+      position: relative;
+    }
+    .task-checkbox:checked {
+      background-color: #2563EB;
+      border-color: #2563EB;
+    }
+    /* Checkmark via pseudo-element */
+    .task-checkbox:checked::after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 1px;
+      width: 8px;
+      height: 12px;
+      border: 2px solid #fff;
+      border-top: none;
+      border-left: none;
+      transform: rotate(45deg);
+    }
+    .task-checkbox:focus-visible {
+      outline: 3px solid #BFDBFE;
+      outline-offset: 1px;
+    }
+
+    /* ────────────────────────────────────────
+       Delete animation — pure opacity+translate,
+       NO max-height (avoids animationend bug)
+    ──────────────────────────────────────── */
+    @keyframes taskSlideOut {
+      0%   { opacity: 1; transform: translateX(0)    scale(1); }
+      100% { opacity: 0; transform: translateX(48px) scale(0.97); }
+    }
+    .task-removing {
+      animation: taskSlideOut 0.28s ease forwards;
+      pointer-events: none; /* prevent double-click during animation */
+    }
+
+    /* ────────────────────────────────────────
+       Entrance animation for new task items
+    ──────────────────────────────────────── */
+    @keyframes taskFadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+    .task-item {
+      animation: taskFadeIn 0.22s ease;
+    }
+
+    /* ────────────────────────────────────────
+       Filter tab states
+    ──────────────────────────────────────── */
+    .filter-tab {
+      font-size: 0.875rem;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1.5px solid transparent;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      color: #64748B;
+      background: transparent;
+    }
+    .filter-tab:hover {
+      background: #EFF6FF;
+      color: #2563EB;
+    }
+    .filter-tab.active {
+      background: #2563EB;
+      color: #fff;
+      border-color: #2563EB;
+    }
+    .filter-tab:focus-visible {
+      outline: 3px solid #BFDBFE;
+      outline-offset: 1px;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen bg-slate-50 font-sans antialiased">
+
+  <!-- ════════════════════════════════════════
+       HEADER
+  ════════════════════════════════════════ -->
+  <header class="bg-white border-b border-slate-100 shadow-sm sticky top-0 z-10">
+    <div class="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
+
+      <!-- Brand icon -->
+      <div class="w-9 h-9 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
+        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24"
+             stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0
+               00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2
+               2 0 012 2m-6 9l2 2 4-4"/>
+        </svg>
+      </div>
+
+      <!-- Title + subtitle -->
+      <div>
+        <h1 class="text-lg font-bold text-slate-800 leading-tight">Sprint Task Tracker</h1>
+        <p class="text-xs text-slate-400 leading-tight">Stay focused. Ship faster.</p>
+      </div>
+
+      <!-- Live summary badges -->
+      <div class="ml-auto flex gap-2 text-xs font-semibold">
+        <span id="header-total"
+              class="px-2.5 py-0.5 bg-slate-100 text-slate-500 rounded-full">0 total</span>
+        <span id="header-done"
+              class="px-2.5 py-0.5 bg-green-50 text-green-600 rounded-full">0 done</span>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ════════════════════════════════════════
+       MAIN
+  ════════════════════════════════════════ -->
+  <main class="max-w-2xl mx-auto px-4 py-6 space-y-5">
+
+    <!-- ── Add Task Card ── -->
+    <section class="bg-white rounded-xl shadow-card p-4 border border-slate-100"
+             aria-label="Add new task">
+      <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+        New Task
+      </h2>
+
+      <form id="task-form" class="flex gap-2" novalidate>
+        <input
+          id="task-input"
+          type="text"
+          maxlength="120"
+          placeholder="e.g. Write unit tests for auth module…"
+          autocomplete="off"
+          aria-label="Task description"
+          class="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-sm
+                 text-slate-700 placeholder-slate-400 transition
+                 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+        />
+        <button
+          type="submit"
+          aria-label="Add task"
+          class="flex items-center gap-1.5 bg-primary hover:bg-primary-dark
+                 active:scale-95 text-white text-sm font-semibold
+                 px-4 py-2.5 rounded-lg transition-all duration-150
+                 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24"
+               stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+          </svg>
+          Add
+        </button>
+      </form>
+
+      <!-- Inline validation -->
+      <p id="input-error" role="alert"
+         class="hidden mt-2 text-xs text-red-500 font-medium">
+        ⚠ Please enter a task description.
+      </p>
+    </section>
+
+    <!-- ── Filter + Task List Card ── -->
+    <section class="bg-white rounded-xl shadow-card border border-slate-100 overflow-hidden"
+             aria-label="Task list">
+
+      <!-- Filter tabs row -->
+      <div class="flex items-center gap-1 px-3 pt-3 pb-2 border-b border-slate-100"
+           role="tablist" aria-label="Filter tasks">
+
+        <button class="filter-tab active" data-filter="all"
+                role="tab" aria-selected="true">
+          All&nbsp;<span id="count-all" class="text-[11px] font-bold opacity-75">0</span>
+        </button>
+        <button class="filter-tab" data-filter="active"
+                role="tab" aria-selected="false">
+          Active&nbsp;<span id="count-active" class="text-[11px] font-bold opacity-75">0</span>
+        </button>
+        <button class="filter-tab" data-filter="completed"
+                role="tab" aria-selected="false">
+          Completed&nbsp;<span id="count-completed" class="text-[11px] font-bold opacity-75">0</span>
+        </button>
+
+        <!-- Clear done button — shown only when completed tasks exist -->
+        <button id="clear-completed"
+                class="ml-auto text-xs text-slate-400 hover:text-red-500
+                       transition-colors px-2 py-1 rounded hidden"
+                aria-label="Clear all completed tasks">
+          Clear done
+        </button>
+      </div>
+
+      <!-- Task list -->
+      <ul id="task-list" aria-label="Tasks" class="divide-y divide-slate-50"></ul>
+
+      <!-- Empty state -->
+      <div id="empty-state"
+           class="flex flex-col items-center justify-center py-14 text-center px-6">
+        <svg class="w-11 h-11 text-slate-200 mb-3" fill="none" viewBox="0 0 24 24"
+             stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.4"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0
+               00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        <p id="empty-message" class="text-sm font-medium text-slate-400">
+          No tasks yet — add one above!
+        </p>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- ════════════════════════════════════════
+       EDIT MODAL
+  ════════════════════════════════════════ -->
+  <div id="edit-modal"
+       role="dialog" aria-modal="true" aria-labelledby="modal-heading"
+       class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50
+              flex items-center justify-center px-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
+
+      <h3 id="modal-heading" class="text-base font-semibold text-slate-700">
+        Edit Task
+      </h3>
+
+      <input
+        id="edit-input"
+        type="text"
+        maxlength="120"
+        aria-label="Edit task text"
+        class="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm
+               text-slate-700 transition
+               focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+      />
+      <p id="edit-error" role="alert"
+         class="hidden text-xs text-red-500 font-medium">
+        ⚠ Task cannot be empty.
+      </p>
+
+      <div class="flex gap-2 justify-end pt-1">
+        <button id="modal-cancel"
+                class="px-4 py-2 text-sm font-medium text-slate-500
+                       hover:text-slate-700 border border-slate-200 rounded-lg transition
+                       focus:outline-none focus:ring-2 focus:ring-slate-300">
+          Cancel
+        </button>
+        <button id="modal-save"
+                class="px-4 py-2 text-sm font-semibold text-white bg-primary
+                       hover:bg-primary-dark rounded-lg transition
+                       focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1">
+          Save Changes
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════
+       JAVASCRIPT
+  ════════════════════════════════════════ -->
+  <script>
+  (() => {
+    'use strict';
+
+    /* ══════════════════════════════════════
+       STORAGE
+    ══════════════════════════════════════ */
+
+    const STORAGE_KEY = 'sprint_tracker_v1';
+
+    /** Load tasks from localStorage. Returns [] on any error. */
+    function loadTasks() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+      } catch {
+        return [];
+      }
+    }
+
+    /** Persist current tasks array. */
+    function saveTasks() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    }
+
+    /* ══════════════════════════════════════
+       STATE
+    ══════════════════════════════════════ */
+
+    /** @type {{ id: string, text: string, completed: boolean }[]} */
+    let tasks        = loadTasks();
+    let activeFilter = 'all';   // 'all' | 'active' | 'completed'
+    let editingId    = null;    // id of task currently in the edit modal
+
+    /* ══════════════════════════════════════
+       DOM REFS
+    ══════════════════════════════════════ */
+
+    const taskForm       = document.getElementById('task-form');
+    const taskInput      = document.getElementById('task-input');
+    const inputError     = document.getElementById('input-error');
+    const taskList       = document.getElementById('task-list');
+    const emptyState     = document.getElementById('empty-state');
+    const emptyMessage   = document.getElementById('empty-message');
+    const clearCompleted = document.getElementById('clear-completed');
+    const editModal      = document.getElementById('edit-modal');
+    const editInput      = document.getElementById('edit-input');
+    const editError      = document.getElementById('edit-error');
+    const modalCancel    = document.getElementById('modal-cancel');
+    const modalSave      = document.getElementById('modal-save');
+    const countAll       = document.getElementById('count-all');
+    const countActive    = document.getElementById('count-active');
+    const countCompleted = document.getElementById('count-completed');
+    const headerTotal    = document.getElementById('header-total');
+    const headerDone     = document.getElementById('header-done');
+    const filterTabs     = document.querySelectorAll('.filter-tab');
+
+    /* ══════════════════════════════════════
+       HELPERS
+    ══════════════════════════════════════ */
+
+    /** Generate a collision-resistant unique id. */
+    function uid() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2);
+    }
+
+    /* ══════════════════════════════════════
+       CRUD
+    ══════════════════════════════════════ */
+
+    /** Prepend a new task and re-render. */
+    function addTask(text) {
+      tasks.unshift({ id: uid(), text: text.trim(), completed: false });
+      saveTasks();
+      render();
+    }
+
+    /** Toggle completed state for a task by id. */
+    function toggleTask(id) {
+      const t = tasks.find(t => t.id === id);
+      if (t) { t.completed = !t.completed; saveTasks(); render(); }
+    }
+
+    /**
+     * Animate the <li> out, then remove from state + re-render.
+     * Uses setTimeout (matching animation duration) instead of animationend
+     * to avoid the known browser bug where animationend never fires when
+     * the animation involves un-animatable properties like max-height.
+     */
+    function deleteTask(id) {
+      const li = taskList.querySelector(`[data-id="${id}"]`);
+      if (!li) return;
+
+      li.classList.add('task-removing');            // trigger CSS animation
+      setTimeout(() => {                            // 280 ms = animation duration
+        tasks = tasks.filter(t => t.id !== id);
+        saveTasks();
+        render();
+      }, 280);
+    }
+
+    /** Open edit modal pre-filled with the task's current text. */
+    function openEdit(id) {
+      const t = tasks.find(t => t.id === id);
+      if (!t) return;
+      editingId       = id;
+      editInput.value = t.text;
+      editError.classList.add('hidden');
+      editModal.classList.remove('hidden');
+      editInput.focus();
+      editInput.select();
+    }
+
+    /** Validate and commit an edit. */
+    function commitEdit() {
+      const text = editInput.value.trim();
+      if (!text) { editError.classList.remove('hidden'); editInput.focus(); return; }
+      const t = tasks.find(t => t.id === editingId);
+      if (t) { t.text = text; saveTasks(); }
+      closeModal();
+      render();
+    }
+
+    /** Close the edit modal without saving. */
+    function closeModal() {
+      editModal.classList.add('hidden');
+      editingId = null;
+    }
+
+    /* ══════════════════════════════════════
+       RENDER
+    ══════════════════════════════════════ */
+
+    /** Return filtered view of tasks based on active tab. */
+    function getFiltered() {
+      if (activeFilter === 'active')    return tasks.filter(t => !t.completed);
+      if (activeFilter === 'completed') return tasks.filter(t =>  t.completed);
+      return tasks;
+    }
+
+    /** Build one <li> for a task without any innerHTML (XSS-safe). */
+    function createItem(task) {
+      const li = document.createElement('li');
+      li.className = [
+        'task-item flex items-center gap-3 px-4 py-3',
+        'group hover:bg-slate-50/70 transition-colors',
+      ].join(' ');
+      li.setAttribute('data-id', task.id);
+
+      /* ── Checkbox ── */
+      const cb = document.createElement('input');
+      cb.type      = 'checkbox';
+      cb.className = 'task-checkbox flex-shrink-0';
+      cb.checked   = task.completed;
+      cb.setAttribute('aria-label',
+        `Mark "${task.text}" as ${task.completed ? 'active' : 'complete'}`);
+      cb.addEventListener('change', () => toggleTask(task.id));
+
+      /* ── Task text ── */
+      const span = document.createElement('span');
+      span.className = [
+        'flex-1 text-sm leading-snug select-none transition-colors',
+        task.completed ? 'line-through text-slate-400' : 'text-slate-700',
+      ].join(' ');
+      span.textContent = task.text;
+
+      /* ── Edit button ── */
+      const editBtn = document.createElement('button');
+      editBtn.type      = 'button';
+      editBtn.className = [
+        'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+        'p-1.5 rounded-lg text-slate-400',
+        'hover:text-primary hover:bg-primary-light',
+        'transition-all duration-150 flex-shrink-0',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+      ].join(' ');
+      editBtn.setAttribute('aria-label', `Edit task: ${task.text}`);
+      editBtn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24"
+             stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828
+               2.828L11.828 15.828a2 2 0 01-1.415.586H7v-3.414a2 2 0
+               01.586-1.414z"/>
+        </svg>`;
+      editBtn.addEventListener('click', () => openEdit(task.id));
+
+      /* ── Delete button ── */
+      const delBtn = document.createElement('button');
+      delBtn.type      = 'button';
+      delBtn.className = [
+        'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+        'p-1.5 rounded-lg text-slate-400',
+        'hover:text-red-500 hover:bg-red-50',
+        'transition-all duration-150 flex-shrink-0',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400',
+      ].join(' ');
+      delBtn.setAttribute('aria-label', `Delete task: ${task.text}`);
+      delBtn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24"
+             stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0
+               01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a1 1 0
+               011-1h6a1 1 0 011 1v2"/>
+        </svg>`;
+      delBtn.addEventListener('click', () => deleteTask(task.id));
+
+      li.append(cb, span, editBtn, delBtn);
+      return li;
+    }
+
+    /** Full render cycle: counts → tabs → list → empty state. */
+    function render() {
+      const total     = tasks.length;
+      const doneCount = tasks.filter(t => t.completed).length;
+      const actCount  = total - doneCount;
+
+      /* Counts */
+      countAll.textContent       = total;
+      countActive.textContent    = actCount;
+      countCompleted.textContent = doneCount;
+      headerTotal.textContent    = `${total} total`;
+      headerDone.textContent     = `${doneCount} done`;
+
+      /* Clear done button visibility */
+      clearCompleted.classList.toggle('hidden', doneCount === 0);
+
+      /* Rebuild task list */
+      taskList.innerHTML = '';
+      const filtered = getFiltered();
+      filtered.forEach(t => taskList.appendChild(createItem(t)));
+
+      /* Empty state */
+      const isEmpty = filtered.length === 0;
+      emptyState.classList.toggle('hidden', !isEmpty);
+      if (isEmpty) {
+        if (activeFilter === 'active')         emptyMessage.textContent = 'No active tasks — great work! 🎉';
+        else if (activeFilter === 'completed') emptyMessage.textContent = 'No completed tasks yet.';
+        else                                   emptyMessage.textContent = 'No tasks yet — add one above!';
+      }
+    }
+
+    /* ══════════════════════════════════════
+       EVENT LISTENERS
+    ══════════════════════════════════════ */
+
+    /* Add task */
+    taskForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const text = taskInput.value.trim();
+      if (!text) {
+        inputError.classList.remove('hidden');
+        taskInput.focus();
+        return;
+      }
+      inputError.classList.add('hidden');
+      addTask(text);
+      taskInput.value = '';
+      taskInput.focus();
+    });
+
+    /* Hide error while user types */
+    taskInput.addEventListener('input', () => {
+      if (taskInput.value.trim()) inputError.classList.add('hidden');
+    });
+
+    /* Filter tabs */
+    filterTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        activeFilter = tab.dataset.filter;
+        filterTabs.forEach(t => {
+          t.classList.toggle('active', t === tab);
+          t.setAttribute('aria-selected', String(t === tab));
+        });
+        render();
+      });
+    });
+
+    /* Clear completed */
+    clearCompleted.addEventListener('click', () => {
+      tasks = tasks.filter(t => !t.completed);
+      saveTasks();
+      render();
+    });
+
+    /* Modal: save */
+    modalSave.addEventListener('click', commitEdit);
+
+    /* Modal: cancel */
+    modalCancel.addEventListener('click', closeModal);
+
+    /* Modal: Enter = save, Escape = close */
+    editInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  commitEdit();
+      if (e.key === 'Escape') closeModal();
+    });
+
+    /* Modal: click backdrop to close */
+    editModal.addEventListener('click', e => {
+      if (e.target === editModal) closeModal();
+    });
+
+    /* Global Escape closes modal */
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !editModal.classList.contains('hidden')) closeModal();
+    });
+
+    /* ══════════════════════════════════════
+       INIT
+    ══════════════════════════════════════ */
+    render();
+
+  })();
+  </script>
+</body>
+</html>
